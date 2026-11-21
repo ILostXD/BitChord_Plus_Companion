@@ -1,0 +1,13 @@
+.git
+.env
+.env.*
+*.exe
+*.tar.gz
+verification.local.json
+.backup-*
+graphify-out/
+/artifacts/
+/backups/
+
+*.txt
+__pycache__/

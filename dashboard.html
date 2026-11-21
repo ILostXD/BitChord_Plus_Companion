@@ -1,0 +1,160 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="color-scheme" content="light dark">
+<title>BitChord+ Matching</title>
+<style>
+  :root {
+    --bg: #f5f5f7; --card: rgba(255,255,255,.72); --stroke: rgba(0,0,0,.06); --text: #1d1d1f; --muted: #6e6e73;
+    --blue: #0a84ff; --green: #30d158; --orange: #ff9f0a; --red: #ff453a; --shadow: 0 8px 30px rgba(0,0,0,.06);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg: #000; --card: rgba(28,28,30,.72); --stroke: rgba(255,255,255,.08); --text: #f5f5f7; --muted: #98989d; --shadow: none; }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text); -webkit-font-smoothing: antialiased;
+    font: 15px/1.4 -apple-system, BlinkMacSystemFont, "SF Pro Text", "Inter", "Segoe UI", system-ui, sans-serif; }
+  main { max-width: 760px; margin: 0 auto; padding: 56px 20px 80px; }
+  header { display: flex; align-items: baseline; justify-content: space-between; margin-bottom: 28px; }
+  h1 { font-size: 34px; letter-spacing: -.02em; margin: 0; font-weight: 700; }
+  h1 span { color: var(--muted); font-weight: 600; }
+  h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); margin: 34px 0 10px 4px; font-weight: 600; }
+  .card { background: var(--card); backdrop-filter: blur(24px) saturate(1.6); -webkit-backdrop-filter: blur(24px) saturate(1.6);
+    border: 1px solid var(--stroke); border-radius: 18px; box-shadow: var(--shadow); overflow: hidden; }
+  .row { display: flex; gap: 14px; align-items: center; padding: 14px 16px; }
+  .row + .row { border-top: 1px solid var(--stroke); }
+  .dot { width: 10px; height: 10px; border-radius: 50%; flex: none; background: var(--muted); }
+  .dot.go { background: var(--blue); animation: pulse 1.4s ease-in-out infinite; } .dot.ok { background: var(--green); }
+  .dot.ask { background: var(--orange); } .dot.bad { background: var(--red); }
+  @keyframes pulse { 50% { opacity: .35; } }
+  .body { flex: 1; min-width: 0; }
+  .title { font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .sub { color: var(--muted); font-size: 13px; }
+  .ask .sub, .row.ask .sub { color: var(--text); opacity: .8; }
+  .actions { display: flex; gap: 8px; flex: none; }
+  button { font: inherit; font-weight: 600; border: 0; border-radius: 999px; padding: 7px 14px; cursor: pointer;
+    background: rgba(120,120,128,.16); color: var(--text); transition: transform .12s, opacity .12s; }
+  button.primary { background: var(--blue); color: #fff; } button:active { transform: scale(.96); }
+  .empty { padding: 22px 16px; color: var(--muted); text-align: center; }
+  #login { max-width: 360px; margin: 18vh auto 0; padding: 26px; }
+  #login h1 { font-size: 28px; margin-bottom: 4px; } #login p { color: var(--muted); margin: 0 0 18px; }
+  input { width: 100%; font: inherit; padding: 11px 14px; margin-bottom: 10px; border-radius: 12px; color: var(--text);
+    border: 1px solid var(--stroke); background: rgba(120,120,128,.12); outline: none; }
+  input:focus { border-color: var(--blue); } #login button { width: 100%; padding: 11px; }
+  #err { color: var(--red); min-height: 20px; margin-top: 8px; font-size: 13px; }
+  .hidden { display: none; }
+  .pill { color: var(--muted); font-size: 13px; cursor: pointer; }
+</style>
+</head>
+<body>
+<div id="login" class="card hidden">
+  <h1>BitChord+</h1>
+  <p>Sign in with your Navidrome account.</p>
+  <input id="user" placeholder="Username" autocomplete="username" autocapitalize="none">
+  <input id="pass" placeholder="Password" type="password" autocomplete="current-password">
+  <button class="primary" id="go">Sign in</button>
+  <div id="err"></div>
+</div>
+<main id="app" class="hidden">
+  <header><h1>Matching <span>BitChord+</span></h1><span class="pill" id="out">Sign out</span></header>
+  <div id="sections"></div>
+</main>
+<script>
+// Minimal MD5 (Subsonic token auth): md5(password + salt).
+function md5(s){function L(k,d){return(k<<d)|(k>>>(32-d))}function K(G,k){var I,d,F,H,x;F=(G&2147483648);H=(k&2147483648);I=(G&1073741824);d=(k&1073741824);x=(G&1073741823)+(k&1073741823);if(I&d)return(x^2147483648^F^H);if(I|d){if(x&1073741824)return(x^3221225472^F^H);else return(x^1073741824^F^H)}else return(x^F^H)}
+function r(d,F,k){return(d&F)|((~d)&k)}function q(d,F,k){return(d&k)|(F&(~k))}function p(d,F,k){return(d^F^k)}function n(d,F,k){return(F^(d|(~k)))}
+function u(G,F,aa,Z,k,H,I){G=K(G,K(K(r(F,aa,Z),k),I));return K(L(G,H),F)}function f(G,F,aa,Z,k,H,I){G=K(G,K(K(q(F,aa,Z),k),I));return K(L(G,H),F)}function D(G,F,aa,Z,k,H,I){G=K(G,K(K(p(F,aa,Z),k),I));return K(L(G,H),F)}function t(G,F,aa,Z,k,H,I){G=K(G,K(K(n(F,aa,Z),k),I));return K(L(G,H),F)}
+function e(G){var Z;var F=G.length;var x=F+8;var k=(x-(x%64))/64;var I=(k+1)*16;var aa=Array(I-1);var d=0;var H=0;while(H<F){Z=(H-(H%4))/4;d=(H%4)*8;aa[Z]=(aa[Z]|(G.charCodeAt(H)<<d));H++}Z=(H-(H%4))/4;d=(H%4)*8;aa[Z]=aa[Z]|(128<<d);aa[I-2]=F<<3;aa[I-1]=F>>>29;return aa}
+function B(x){var k="",F="",G,d;for(d=0;d<=3;d++){G=(x>>>(d*8))&255;F="0"+G.toString(16);k=k+F.substr(F.length-2,2)}return k}
+function J(k){k=k.replace(/\r\n/g,"\n");var d="";for(var F=0;F<k.length;F++){var x=k.charCodeAt(F);if(x<128){d+=String.fromCharCode(x)}else if((x>127)&&(x<2048)){d+=String.fromCharCode((x>>6)|192);d+=String.fromCharCode((x&63)|128)}else{d+=String.fromCharCode((x>>12)|224);d+=String.fromCharCode(((x>>6)&63)|128);d+=String.fromCharCode((x&63)|128)}}return d}
+var C=Array();var P,h,E,v,g,Y,X,W,V;var S=7,Q=12,N=17,M=22;var A=5,z=9,y=14,w=20;var o=4,m=11,l=16,j=23;var U=6,T=10,R=15,O=21;s=J(s);C=e(s);Y=1732584193;X=4023233417;W=2562383102;V=271733878;
+for(P=0;P<C.length;P+=16){h=Y;E=X;v=W;g=V;Y=u(Y,X,W,V,C[P+0],S,3614090360);V=u(V,Y,X,W,C[P+1],Q,3905402710);W=u(W,V,Y,X,C[P+2],N,606105819);X=u(X,W,V,Y,C[P+3],M,3250441966);Y=u(Y,X,W,V,C[P+4],S,4118548399);V=u(V,Y,X,W,C[P+5],Q,1200080426);W=u(W,V,Y,X,C[P+6],N,2821735955);X=u(X,W,V,Y,C[P+7],M,4249261313);Y=u(Y,X,W,V,C[P+8],S,1770035416);V=u(V,Y,X,W,C[P+9],Q,2336552879);W=u(W,V,Y,X,C[P+10],N,4294925233);X=u(X,W,V,Y,C[P+11],M,2304563134);Y=u(Y,X,W,V,C[P+12],S,1804603682);V=u(V,Y,X,W,C[P+13],Q,4254626195);W=u(W,V,Y,X,C[P+14],N,2792965006);X=u(X,W,V,Y,C[P+15],M,1236535329);
+Y=f(Y,X,W,V,C[P+1],A,4129170786);V=f(V,Y,X,W,C[P+6],z,3225465664);W=f(W,V,Y,X,C[P+11],y,643717713);X=f(X,W,V,Y,C[P+0],w,3921069994);Y=f(Y,X,W,V,C[P+5],A,3593408605);V=f(V,Y,X,W,C[P+10],z,38016083);W=f(W,V,Y,X,C[P+15],y,3634488961);X=f(X,W,V,Y,C[P+4],w,3889429448);Y=f(Y,X,W,V,C[P+9],A,568446438);V=f(V,Y,X,W,C[P+14],z,3275163606);W=f(W,V,Y,X,C[P+3],y,4107603335);X=f(X,W,V,Y,C[P+8],w,1163531501);Y=f(Y,X,W,V,C[P+13],A,2850285829);V=f(V,Y,X,W,C[P+2],z,4243563512);W=f(W,V,Y,X,C[P+7],y,1735328473);X=f(X,W,V,Y,C[P+12],w,2368359562);
+Y=D(Y,X,W,V,C[P+5],o,4294588738);V=D(V,Y,X,W,C[P+8],m,2272392833);W=D(W,V,Y,X,C[P+11],l,1839030562);X=D(X,W,V,Y,C[P+14],j,4259657740);Y=D(Y,X,W,V,C[P+1],o,2763975236);V=D(V,Y,X,W,C[P+4],m,1272893353);W=D(W,V,Y,X,C[P+7],l,4139469664);X=D(X,W,V,Y,C[P+10],j,3200236656);Y=D(Y,X,W,V,C[P+13],o,681279174);V=D(V,Y,X,W,C[P+0],m,3936430074);W=D(W,V,Y,X,C[P+3],l,3572445317);X=D(X,W,V,Y,C[P+6],j,76029189);Y=D(Y,X,W,V,C[P+9],o,3654602809);V=D(V,Y,X,W,C[P+12],m,3873151461);W=D(W,V,Y,X,C[P+15],l,530742520);X=D(X,W,V,Y,C[P+2],j,3299628645);
+Y=t(Y,X,W,V,C[P+0],U,4096336452);V=t(V,Y,X,W,C[P+7],T,1126891415);W=t(W,V,Y,X,C[P+14],R,2878612391);X=t(X,W,V,Y,C[P+5],O,4237533241);Y=t(Y,X,W,V,C[P+12],U,1700485571);V=t(V,Y,X,W,C[P+3],T,2399980690);W=t(W,V,Y,X,C[P+10],R,4293915773);X=t(X,W,V,Y,C[P+1],O,2240044497);Y=t(Y,X,W,V,C[P+8],U,1873313359);V=t(V,Y,X,W,C[P+15],T,4264355552);W=t(W,V,Y,X,C[P+6],R,2734768916);X=t(X,W,V,Y,C[P+13],O,1309151649);Y=t(Y,X,W,V,C[P+4],U,4149444226);V=t(V,Y,X,W,C[P+11],T,3174756917);W=t(W,V,Y,X,C[P+2],R,718787259);X=t(X,W,V,Y,C[P+9],O,3951481745);
+Y=K(Y,h);X=K(X,E);W=K(W,v);V=K(V,g)}
+return(B(Y)+B(X)+B(W)+B(V)).toLowerCase()}
+
+const $ = id => document.getElementById(id);
+let auth = null;
+try { auth = JSON.parse(localStorage.getItem('bcp-auth')); } catch (e) {}
+
+function headers() { return { 'X-Jam-Navidrome-User': auth.user, 'X-Jam-Navidrome-Salt': auth.salt, 'X-Jam-Navidrome-Token': auth.token, 'Content-Type': 'application/json' }; }
+async function api(path, opts = {}) {
+  const r = await fetch('/api/v1/acquisition/jobs' + path, { ...opts, headers: headers() });
+  if (r.status === 401) { signOut(); throw new Error('signed out'); }
+  return r.json();
+}
+function signOut() { localStorage.removeItem('bcp-auth'); auth = null; show(); }
+$('out').onclick = signOut;
+$('go').onclick = async () => {
+  const user = $('user').value.trim(), pass = $('pass').value;
+  if (!user || !pass) return;
+  const salt = [...crypto.getRandomValues(new Uint8Array(12))].map(b => b.toString(16).padStart(2, '0')).join('');
+  auth = { user, salt, token: md5(pass + salt) };
+  const r = await fetch('/api/v1/acquisition/jobs', { headers: headers() });
+  if (r.ok) { localStorage.setItem('bcp-auth', JSON.stringify(auth)); $('err').textContent = ''; show(); }
+  else { auth = null; $('err').textContent = 'That username or password was not accepted.'; }
+};
+['user', 'pass'].forEach(id => $(id).addEventListener('keydown', e => { if (e.key === 'Enter') $('go').click(); }));
+
+const REASONS = { no_suitable_slskd_match: 'No matching lossless copy was found', slskd_search_timeout: 'The search timed out', slskd_download_failed: 'The download failed' };
+const esc = s => String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+const name = j => `${esc(j.Artist)} – ${esc(j.Title)}`;
+function row(j, dot, sub, actions = '') {
+  return `<div class="row ${dot === 'ask' ? 'ask' : ''}"><span class="dot ${dot}"></span><div class="body"><div class="title">${name(j)}</div><div class="sub">${sub}</div></div><div class="actions">${actions}</div></div>`;
+}
+function section(title, rows, empty) {
+  if (!rows.length && !empty) return '';
+  return `<h2>${title}</h2><div class="card">${rows.length ? rows.join('') : `<div class="empty">${empty}</div>`}</div>`;
+}
+function render(all) {
+  // Several requests for the same thing show as one: the newest.
+  const seen = new Set();
+  const jobs = [...all].sort((a, b) => String(b.UpdatedAt).localeCompare(String(a.UpdatedAt))).filter(j => {
+    const k = [j.Artist, j.Title, j.Kind, j.AlbumTitle].join('|').toLowerCase();
+    if (seen.has(k)) return false; seen.add(k); return true;
+  });
+  const ask = jobs.filter(j => j.Status === 'needs_review' && j.Error === 'library_review');
+  const active = jobs.filter(j => ['searching', 'downloading', 'importing', 'moved'].includes(j.Status));
+  const done = jobs.filter(j => j.Status === 'rescanned').slice(0, 15);
+  const have = jobs.filter(j => j.Status === 'in_library' || j.Status === 'skipped').slice(0, 15);
+  const bad = jobs.filter(j => j.Status === 'failed' || (j.Status === 'needs_review' && j.Error !== 'library_review')).slice(0, 15);
+  const kind = j => j.Kind === 'album' ? 'Album' : 'Song';
+  $('sections').innerHTML =
+    section('Needs your decision', ask.map(j => row(j, 'ask', `${esc(j.ReviewSummary)}. Download it anyway?`,
+      `<button data-act="skip" data-id="${j.ID}">Keep mine</button><button class="primary" data-act="download" data-id="${j.ID}">Download</button>`)), '') +
+    section('In progress', active.map(j => row(j, 'go', `${kind(j)} · ${esc(j.Status)}…`,
+      `<button data-act="cancel" data-id="${j.ID}">Cancel</button>`)), 'Nothing is downloading.') +
+    section('Added to your library', done.map(j => row(j, 'ok', kind(j))), '') +
+    section('Already in your library', have.map(j => row(j, 'ok', esc(j.ReviewSummary || 'Already there') + (j.Status === 'skipped' ? ' · kept yours' : ''))), '') +
+    section('Could not be added', bad.map(j => row(j, 'bad', esc(REASONS[j.Error] || (j.Error || 'Unknown reason').replaceAll('_', ' ')),
+      (j.CanApproveMetadata ? `<button class="primary" data-act="approve" data-id="${j.ID}">Import anyway</button>` : '') +
+      `<button data-act="retry" data-id="${j.ID}">Try again</button>`)), '');
+}
+let jobsById = {};
+$('sections').addEventListener('click', async e => {
+  const b = e.target.closest('button'); if (!b) return;
+  const id = b.dataset.id, act = b.dataset.act; b.disabled = true;
+  let r;
+  if (act === 'cancel') r = await api(`/${id}/cancel`, { method: 'POST' });
+  else if (act === 'approve') { const j = jobsById[id]; r = await api('', { method: 'POST', body: JSON.stringify({ retry_id: id, approve_metadata: true, artist: j.Artist, title: j.Title }) }); }
+  else if (act === 'retry') { const j = jobsById[id]; r = await api('', { method: 'POST', body: JSON.stringify({ artist: j.Artist, title: j.Title, kind: j.Kind, album: j.AlbumTitle, retry_id: id }) }); }
+  else r = await api(`/${id}/decision`, { method: 'POST', body: JSON.stringify({ action: act }) });
+  if (r && r.error) alert('That did not work: ' + String(r.error).replaceAll('_', ' '));
+  tick();
+});
+async function tick() {
+  if (!auth) return;
+  try { const jobs = await api(''); jobsById = Object.fromEntries(jobs.map(j => [j.ID, j])); render(jobs); } catch (e) {}
+}
+function show() {
+  $('login').classList.toggle('hidden', !!auth); $('app').classList.toggle('hidden', !auth);
+  if (auth) tick();
+}
+show(); setInterval(tick, 5000);
+</script>
+</body>
+</html>

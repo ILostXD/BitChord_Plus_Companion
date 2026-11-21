@@ -1,0 +1,45 @@
+services:
+  companion:
+    build: .
+    image: bitchord-plus-companion:local
+    # Match the host media/SMB account so imported files stay editable from the share.
+    user: "${COMPANION_UID:-10001}:${COMPANION_GID:-10001}"
+    restart: unless-stopped
+    init: true
+    env_file: .env
+    environment:
+      SLSKD_DOWNLOAD_PATH: /downloads
+    ports:
+      - "${COMPANION_BIND_ADDRESS:-127.0.0.1}:${COMPANION_PORT:-8088}:8080"
+    volumes:
+      # Acquisition alone needs these writable; all work is confined to /downloads/glaze.
+      - type: bind
+        source: ${NAVIDROME_LIBRARY_HOST_PATH:?Set the real library host path in .env}
+        target: /music
+        read_only: false
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ${SLSKD_DOWNLOAD_HOST_PATH:-/mnt/media/HDD/mediaserver/downloads}
+        target: /downloads
+        read_only: false
+        bind:
+          create_host_path: false
+    networks:
+      - media
+    read_only: true
+    tmpfs:
+      - /tmp:size=2147483648,mode=1777
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    healthcheck:
+      test: [CMD, python3, -c, "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/live', timeout=4)"]
+      interval: 30s
+      timeout: 5s
+      start_period: 10s
+      retries: 3
+
+networks:
+  media:
+    external: true
+    name: ${DOCKER_NETWORK:-mediaserver_default}

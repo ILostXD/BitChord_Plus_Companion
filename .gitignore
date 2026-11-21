@@ -1,0 +1,12 @@
+.env
+.env.*
+!.env.example
+*.exe
+bitchord-plus-companion
+*.tar.gz
+verification.local.json
+graphify-out/
+__pycache__/
+setup-jam-test.txt
+/artifacts/
+/backups/

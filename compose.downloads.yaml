@@ -1,0 +1,16 @@
+services:
+  companion:
+    environment:
+      DOWNLOADS_ENABLED: "true"
+      COMPANION_STATE_PATH: /downloads/glaze
+      NAVIDROME_LIBRARY_PATH: /music
+      SLSKD_DOWNLOAD_PATH: /downloads
+    volumes:
+      - type: bind
+        source: ${NAVIDROME_LIBRARY_HOST_PATH:?Set the real library host path}
+        target: /music
+        bind: {create_host_path: false}
+      - type: bind
+        source: ${SLSKD_DOWNLOAD_HOST_PATH:?Set the real completed-download host path}
+        target: /downloads
+        bind: {create_host_path: false}
