@@ -61,7 +61,7 @@ func TestSlskdSearchAllowsTimeForResponses(t *testing.T) {
 	}))
 	defer server.Close()
 	a := &acquisitionService{cfg: config{slskdURL: server.URL, formatOrder: []string{"flac", "mp3", "other"}}, client: server.Client()}
-	user, files, _, err := a.searchSlskd(context.Background(), "token", "Young Thug", "Song", "track", 0, "")
+	user, files, _, err := a.searchSlskd(context.Background(), "token", "Young Thug", "Song", "track", 0, "", "")
 	if err != nil || user != "peer" || len(files) != 1 {
 		t.Fatalf("search user=%q files=%d err=%v", user, len(files), err)
 	}
@@ -280,7 +280,7 @@ func TestDownloadMatchingRejectsCompilationsAndOtherEditions(t *testing.T) {
 	for _, kind := range []string{"album", "track"} {
 		responses := []slskResponse{
 			{Username: "compilation", HasFreeUploadSlot: true, Files: []slskFile{file(`Various Artists/Rap Caviar/Quavo - HAAVIN.flac`)}},
-			{Username: "artist", Files: []slskFile{file(`Quavo/HAAVIN/01 HAAVIN.mp3`)}},
+			{Username: "artist", Files: []slskFile{file(`Quavo/HAAVIN/01 HAAVIN.flac`)}},
 		}
 		user, _, _ := rankSlskd(responses, "Quavo", "HAAVIN", kind, 1, []string{"flac", "mp3", "other"}, "")
 		if user != "artist" {
@@ -319,7 +319,7 @@ func TestDownloadMatchingRejectsCompilationsAndOtherEditions(t *testing.T) {
 	}
 	user, _, _ := rankSlskd([]slskResponse{
 		{Username: "wrong-album", HasFreeUploadSlot: true, Files: []slskFile{file(`Quavo/Rap Caviar/HAAVIN.flac`)}},
-		{Username: "single", Files: []slskFile{file(`Quavo/HAAVIN/HAAVIN.mp3`)}},
+		{Username: "single", Files: []slskFile{file(`Quavo/HAAVIN/HAAVIN.flac`)}},
 	}, "Quavo", "HAAVIN", "track", 0, []string{"flac", "mp3", "other"}, "HAAVIN")
 	if user != "single" {
 		t.Fatal("selected album context lost", user)

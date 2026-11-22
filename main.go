@@ -1,6 +1,8 @@
 package main
 
 import (
+	"github.com/ILostXD/BitChord_Plus_Companion/listen"
+
 	"bufio"
 	"context"
 	"crypto/subtle"
@@ -83,7 +85,13 @@ func newHandler(token string, ctx context.Context, cfg config) http.Handler {
 	mux.HandleFunc("GET /api/v1/capabilities", func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, 200, map[string]any{"jam": true, "jam_streaming": true, "downloads": cfg.downloadPath != "", "fingerprinting": cfg.acoustidKey != "", "lastfm_metadata": cfg.lastfmKey != ""})
 	})
+	// Listen Together parties: the upstream party server, with its own party tokens.
+	parties := listen.Handler()
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if listen.Owns(r.URL.Path) {
+			parties.ServeHTTP(w, r)
+			return
+		}
 		start := time.Now()
 		rec := &statusRecorder{ResponseWriter: w, status: http.StatusOK}
 		w = rec

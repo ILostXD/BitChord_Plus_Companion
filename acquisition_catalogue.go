@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/url"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -132,7 +133,7 @@ func (a *acquisitionService) jobTrackCount(ctx context.Context, job *acquisition
 		var search struct {
 			Data []deezerAlbum `json:"data"`
 		}
-		_, err := a.request(ctx, http.MethodGet, "https://api.deezer.com/search/album?q="+url.QueryEscape(job.Artist+" "+job.Title), nil, nil, &search)
+		_, err := a.request(ctx, http.MethodGet, "https://api.deezer.com/search/album?q="+url.QueryEscape(cleanArtist(job.Artist)+" "+job.Title), nil, nil, &search)
 		if err == nil {
 			ids := make(map[string]bool)
 			var exact string
@@ -175,6 +176,10 @@ func (a *acquisitionService) jobTrackCount(ctx context.Context, job *acquisition
 // edition labels and accents, and the standard and deluxe editions are never swapped; the artist
 // only has to share a credit, so "Loe Shimmy, Don Toliver" finds "Loe Shimmy" and "JAŸ-Z" finds "JAY Z".
 func sameRelease(album deezerAlbum, artist, title string) bool {
+	// A title of symbols only ("?") has no letters to compare: it must be the same text.
+	if baseTitle(title) == "" {
+		return strings.TrimSpace(album.Title) == strings.TrimSpace(title) && overlap(credits(artist), credits(album.Artist.Name))
+	}
 	return baseTitle(album.Title) == baseTitle(title) && isDeluxe(album.Title) == isDeluxe(title) &&
 		overlap(credits(artist), credits(album.Artist.Name))
 }

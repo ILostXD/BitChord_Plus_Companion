@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"net/url"
 	"regexp"
+	"sort"
 	"strings"
 	"time"
 )
@@ -299,6 +300,12 @@ func (a *acquisitionService) decideLibrary(ctx context.Context, artist, title, k
 		if d := decideAlbum(artist, title, albums); d.Action != decideDownload {
 			return d
 		}
+		// The same title filed under another of the artist's names (Kanye West / Ye).
+		if sameTitleAlbum(title, albums) {
+			if d := decideAlbum(a.withAliases(ctx, artist), title, albums); d.Action != decideDownload {
+				return d
+			}
+		}
 		// Asked for as an album but really a single: fine if the library has that song.
 		if d := decideTrack(artist, title, 0, songs); d.Action == decideSkip {
 			return d
@@ -309,7 +316,29 @@ func (a *acquisitionService) decideLibrary(ctx context.Context, artist, title, k
 	if err != nil {
 		return libraryDecision{Action: decideDownload}
 	}
-	return decideTrack(artist, title, duration, songs)
+	d := decideTrack(artist, title, duration, songs)
+	if d.Action == decideDownload && sameTitleSong(title, songs) {
+		return decideTrack(a.withAliases(ctx, artist), title, duration, songs)
+	}
+	return d
+}
+
+func sameTitleAlbum(title string, albums []libAlbum) bool {
+	for _, al := range albums {
+		if baseTitle(al.Title) == baseTitle(title) {
+			return true
+		}
+	}
+	return false
+}
+
+func sameTitleSong(title string, songs []libSong) bool {
+	for _, s := range songs {
+		if baseTitle(s.Title) == baseTitle(title) {
+			return true
+		}
+	}
+	return false
 }
 
 // recordLibraryDecision answers a request the library already covers (or can't decide
@@ -377,14 +406,25 @@ func (a *acquisitionService) coveredByLibrary(ctx context.Context, saved acquisi
 // failed before this check existed is often for something the library already has.
 func (a *acquisitionService) sweepFailed() {
 	time.Sleep(20 * time.Second)
+	a.sweepLibrary(0)
+}
+
+// sweepLibrary closes every failure the library now covers. Up to [retries] of the newest
+// that it still doesn't are asked for again, in case they can be found now.
+func (a *acquisitionService) sweepLibrary(retries int) {
+	if !a.sweeping.CompareAndSwap(false, true) {
+		return
+	}
+	defer a.sweeping.Store(false)
 	a.mu.Lock()
 	var failed []acquisitionJob
 	for _, j := range a.jobs {
-		if j.Status == "failed" {
+		if j.Status == "failed" && !j.Hidden {
 			failed = append(failed, *j)
 		}
 	}
 	a.mu.Unlock()
+	sort.Slice(failed, func(i, k int) bool { return failed[i].UpdatedAt.After(failed[k].UpdatedAt) })
 	checked := map[string]string{}
 	for _, j := range failed {
 		if a.ctx.Err() != nil {
@@ -408,7 +448,17 @@ func (a *acquisitionService) sweepFailed() {
 			}
 			j.UpdatedAt = time.Now().UTC()
 			_ = a.update(&j)
+		} else if retries > 0 {
+			retries--
+			_, _ = a.enqueueCatalogueOpt(cleanArtist(j.Artist), j.Title, j.Kind, j.CatalogueAlbumID, j.AlbumTitle, j.AlbumArtist, true)
 		}
 		time.Sleep(300 * time.Millisecond)
 	}
+}
+
+// refresh: the dashboard's refresh button. The sweep runs in the background; the dashboard
+// shows its results as it polls.
+func (a *acquisitionService) refresh(w http.ResponseWriter, _ *http.Request) {
+	go a.sweepLibrary(15)
+	writeJSON(w, http.StatusAccepted, map[string]string{"status": "refreshing"})
 }

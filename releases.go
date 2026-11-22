@@ -205,8 +205,14 @@ func (s *releaseService) artists(ctx context.Context, id string) ([]releaseArtis
 }
 func (s *releaseService) list(w http.ResponseWriter, r *http.Request) {
 	artistID := r.URL.Query().Get("artist_id")
-	if len(artistID) > 128 {
+	artistName := strings.TrimSpace(r.URL.Query().Get("artist_name"))
+	if len(artistID) > 128 || len(artistName) > 128 {
 		writeJSON(w, 400, map[string]string{"error": "invalid_artist"})
+		return
+	}
+	// Any artist by name (an artist page in the app), whether or not the server has them.
+	if artistName != "" && artistID == "" {
+		s.byName(w, r, artistName)
 		return
 	}
 	artists, err := s.artists(r.Context(), artistID)
@@ -263,12 +269,15 @@ func (s *releaseService) detail(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if exists {
-		// A failed catalogue refresh must not discard the last good release details.
-		if cached.ArtistID == "" {
-			_ = s.registerCatalogue(r.Context(), cached.ID)
-		} else {
-			_ = s.refresh(r.Context(), releaseArtist{cached.ArtistID, cached.Artist})
-		}
+		// The known details are answered at once; the catalogue is checked again behind them
+		// (a failed refresh never discards the last good details).
+		go func() {
+			if cached.ArtistID == "" {
+				_ = s.registerCatalogue(s.bg(), cached.ID)
+			} else {
+				_ = s.refresh(s.bg(), releaseArtist{cached.ArtistID, cached.Artist})
+			}
+		}()
 	}
 	s.mu.Lock()
 	album, ok := s.data.Albums[r.PathValue("id")]
@@ -500,6 +509,10 @@ func (s *releaseService) refresh(ctx context.Context, artist releaseArtist) erro
 	previous, _ := json.Marshal(s.data)
 	for _, album := range albums {
 		old := s.data.Albums[album.ID]
+		// A lookup by name doesn't take an album away from the server artist it was found for.
+		if old.ArtistID != "" && strings.HasPrefix(album.ArtistID, "name:") {
+			album.ArtistID = old.ArtistID
+		}
 		album.JobID = old.JobID
 		album.Status, album.Error, album.CheckedAt, album.NextCheckAt = old.Status, old.Error, old.CheckedAt, old.NextCheckAt
 		s.data.Albums[album.ID] = album
@@ -693,7 +706,7 @@ func (s *releaseService) requestRemainingTracks(album *upcomingRelease) bool {
 		job := s.a.recordLibraryDecisionOpt(context.Background(), t.Artist, t.Title, "track", album.Title, t.Duration, true)
 		if job == nil {
 			var err error
-			if job, err = s.a.enqueueCatalogueOpt(t.Artist, t.Title, "track", "", album.Title, true); err != nil {
+			if job, err = s.a.enqueueCatalogueOpt(t.Artist, t.Title, "track", "", album.Title, album.Artist, true); err != nil {
 				continue
 			}
 		}
@@ -705,4 +718,45 @@ func (s *releaseService) requestRemainingTracks(album *upcomingRelease) bool {
 	}
 	album.JobID, album.Status, album.Error = last, "searching", ""
 	return true
+}
+
+// byName lists the upcoming albums of the artist called [name] (Apple's catalogue, checked at
+// most every few hours), for an artist page that isn't one of the server's starred artists.
+func (s *releaseService) byName(w http.ResponseWriter, r *http.Request, name string) {
+	id := "name:" + normalize(name)
+	// Answered from what is known at once; a stale artist is checked again in the background,
+	// and one never looked up is waited for only briefly (the app shows it when it can).
+	s.mu.Lock()
+	checked, known := s.data.Checked[id]
+	s.mu.Unlock()
+	if !known {
+		done := make(chan struct{})
+		go func() { _ = s.refresh(s.bg(), releaseArtist{id, name}); close(done) }()
+		select {
+		case <-done:
+		case <-time.After(5 * time.Second):
+		case <-r.Context().Done():
+		}
+	} else if time.Since(checked) > 6*time.Hour {
+		go func() { _ = s.refresh(s.bg(), releaseArtist{id, name}) }()
+	}
+	s.mu.Lock()
+	out := []upcomingRelease{}
+	for _, album := range s.data.Albums {
+		if (album.ArtistID == id || normalize(album.Artist) == normalize(name)) && album.ReleaseAt > time.Now().UnixMilli() {
+			out = append(out, s.userAlbum(album, companionUsername(r.Context(), s.a.cfg)))
+		}
+	}
+	s.mu.Unlock()
+	sort.Slice(out, func(i, j int) bool { return out[i].ReleaseAt < out[j].ReleaseAt })
+	writeJSON(w, 200, out)
+}
+
+// bg is the context background catalogue checks run under: the service's own, outliving
+// the request that started them.
+func (s *releaseService) bg() context.Context {
+	if s.a != nil && s.a.ctx != nil {
+		return s.a.ctx
+	}
+	return context.Background()
 }

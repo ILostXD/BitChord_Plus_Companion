@@ -138,8 +138,8 @@ func TestLosslessBeatsBetterMatchedLossy(t *testing.T) {
 		t.Fatalf("lossless must win, got %s", user)
 	}
 	user, _, _ = rankSlskd(responses[:1], "Cigarettes After Sex", "Nothing's Gonna Hurt You Baby", "track", 0, []string{"flac", "mp3", "other"}, "")
-	if user != "mp3-in-artist-folder" {
-		t.Fatalf("with no lossless source the mp3 is used, got %q", user)
+	if user != "" {
+		t.Fatalf("a lossy copy is never downloaded, got %q", user)
 	}
 }
 

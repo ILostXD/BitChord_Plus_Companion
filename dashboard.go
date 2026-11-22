@@ -16,7 +16,7 @@ var dashboardHTML []byte
 // the browser and reads /api/v1/acquisition/jobs like the app does, so serving it needs no auth.
 func serveDashboard(w http.ResponseWriter, _ *http.Request) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	w.Header().Set("Content-Security-Policy", "default-src 'self'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; img-src data:")
+	w.Header().Set("Content-Security-Policy", "default-src 'self'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; img-src data: https:")
 	_, _ = w.Write(dashboardHTML)
 }
 

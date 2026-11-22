@@ -17,10 +17,12 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"sort"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 	"unicode"
 )
@@ -33,16 +35,24 @@ type acquisitionJob struct {
 	Files                                  []slskFile
 	CatalogueAlbumID                       string
 	AlbumTitle                             string
-	ExpectedTracks                         int
-	CreatedAt, UpdatedAt                   time.Time
-	FailedPeers                            []string
-	SwitchPeer                             bool
-	LastProgressAt                         time.Time
-	BytesTransferred                       int64
-	ReviewSummary                          string
-	CanApproveMetadata, ApproveMetadata    bool
-	ReviewFiles, ApprovedFiles             map[string]string
-	CancelRequested                        bool
+	// The album's own artist, for a song looked for in its album when it isn't shared alone.
+	AlbumArtist          string `json:",omitempty"`
+	ExpectedTracks       int
+	CreatedAt, UpdatedAt time.Time
+	FailedPeers          []string
+	SwitchPeer           bool
+	LastProgressAt       time.Time
+	BytesTransferred     int64
+	ReviewSummary        string
+	// Deleted from the dashboards by the user; kept, so it can be restored.
+	Hidden bool `json:",omitempty"`
+	// Artwork for the dashboards: sent with the request, or looked up on Deezer.
+	Cover string `json:",omitempty"`
+	// Set for bookkeeping saves (artwork, hiding) that must not count as the job changing.
+	keepTime                            bool
+	CanApproveMetadata, ApproveMetadata bool
+	ReviewFiles, ApprovedFiles          map[string]string
+	CancelRequested                     bool
 	// Forced skips the library check: the user said to download it anyway.
 	Forced bool
 }
@@ -77,6 +87,7 @@ type acquisitionService struct {
 	ctx               context.Context
 	client            *http.Client
 	mu                sync.Mutex
+	sweeping          atomic.Bool
 	submitMu          sync.Mutex
 	scanMu            sync.Mutex
 	jobs              map[string]*acquisitionJob
@@ -103,11 +114,17 @@ func registerAcquisition(mux *http.ServeMux, ctx context.Context, cfg config) *a
 	a.repairMetadata = repairDownloadedMetadata
 	a.restore()
 	go a.sweepFailed()
+	go a.fillCovers()
 	mux.HandleFunc("POST /api/v1/acquisition/jobs", a.create)
 	mux.HandleFunc("GET /api/v1/acquisition/jobs", a.list)
 	mux.HandleFunc("GET /api/v1/acquisition/jobs/{jobId}", a.get)
 	mux.HandleFunc("POST /api/v1/acquisition/jobs/{jobId}/cancel", a.cancelJob)
 	mux.HandleFunc("POST /api/v1/acquisition/jobs/{jobId}/decision", a.decide)
+	mux.HandleFunc("POST /api/v1/acquisition/refresh", a.refresh)
+	mux.HandleFunc("POST /api/v1/acquisition/jobs/hidden", a.setHidden)
+	mux.HandleFunc("GET /api/v1/acquisition/jobs/settings", a.settings)
+	mux.HandleFunc("POST /api/v1/acquisition/jobs/settings", a.settings)
+	mux.HandleFunc("POST /api/v1/acquisition/jobs/{jobId}/lossy", a.fillLossy)
 	mux.HandleFunc("GET /api/v1/acquisition/jobs/preview/{albumId}", a.previewAlbum)
 	return a
 }
@@ -134,6 +151,8 @@ func (a *acquisitionService) create(w http.ResponseWriter, r *http.Request) {
 		Artist, Title, Kind string
 		Album               string
 		CatalogueAlbumID    string `json:"catalogue_album_id"`
+		AlbumArtist         string `json:"album_artist"`
+		Cover               string `json:"cover"`
 		RetryID             string `json:"retry_id"`
 		ApproveMetadata     bool   `json:"approve_metadata"`
 		DurationSec         int    `json:"duration_sec"`
@@ -146,7 +165,7 @@ func (a *acquisitionService) create(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid_json"})
 		return
 	}
-	input.Artist, input.Title, input.Album = strings.TrimSpace(input.Artist), strings.TrimSpace(input.Title), strings.TrimSpace(input.Album)
+	input.Artist, input.Title, input.Album = cleanArtist(input.Artist), strings.TrimSpace(input.Title), strings.TrimSpace(input.Album)
 	retrying := false
 	if input.RetryID != "" {
 		a.submitMu.Lock()
@@ -155,6 +174,7 @@ func (a *acquisitionService) create(w http.ResponseWriter, r *http.Request) {
 		var saved acquisitionJob
 		if ok {
 			saved = *previous
+			saved.Artist = cleanArtist(saved.Artist)
 		}
 		a.mu.Unlock()
 		if !ok {
@@ -195,7 +215,7 @@ func (a *acquisitionService) create(w http.ResponseWriter, r *http.Request) {
 			}
 			retrying = true
 		}
-		input.Artist, input.Title, input.Kind, input.CatalogueAlbumID, input.Album = saved.Artist, saved.Title, saved.Kind, saved.CatalogueAlbumID, saved.AlbumTitle
+		input.Artist, input.Title, input.Kind, input.CatalogueAlbumID, input.Album, input.AlbumArtist = saved.Artist, saved.Title, saved.Kind, saved.CatalogueAlbumID, saved.AlbumTitle, saved.AlbumArtist
 	}
 	if input.Kind == "" {
 		input.Kind = "track"
@@ -210,7 +230,7 @@ func (a *acquisitionService) create(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	job, err := a.enqueueCatalogueOpt(input.Artist, input.Title, input.Kind, input.CatalogueAlbumID, input.Album, retrying)
+	job, err := a.enqueueCatalogueOpt(input.Artist, input.Title, input.Kind, input.CatalogueAlbumID, input.Album, input.AlbumArtist, retrying)
 	if err != nil {
 		status := http.StatusInternalServerError
 		if err.Error() == "queue_full" {
@@ -219,6 +239,7 @@ func (a *acquisitionService) create(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, status, map[string]string{"error": err.Error()})
 		return
 	}
+	a.setCover(job.ID, input.Cover)
 	writeJSON(w, http.StatusAccepted, job)
 }
 
@@ -228,11 +249,11 @@ func (a *acquisitionService) enqueue(artist, title, kind string) (*acquisitionJo
 }
 
 func (a *acquisitionService) enqueueCatalogue(artist, title, kind, catalogueID, albumTitle string) (*acquisitionJob, error) {
-	return a.enqueueCatalogueOpt(artist, title, kind, catalogueID, albumTitle, false)
+	return a.enqueueCatalogueOpt(artist, title, kind, catalogueID, albumTitle, "", false)
 }
 
 // enqueueCatalogueOpt: [retry] means a person asked again, so a recent failure doesn't suppress the new job.
-func (a *acquisitionService) enqueueCatalogueOpt(artist, title, kind, catalogueID, albumTitle string, retry bool) (*acquisitionJob, error) {
+func (a *acquisitionService) enqueueCatalogueOpt(artist, title, kind, catalogueID, albumTitle, albumArtist string, retry bool) (*acquisitionJob, error) {
 	if (albumTitle != "" && !safeName(albumTitle)) || a.cfg.downloadPath == "" || !safeName(artist) || !safeName(title) || (kind != "album" && kind != "track") {
 		return nil, errors.New("invalid_request")
 	}
@@ -240,7 +261,7 @@ func (a *acquisitionService) enqueueCatalogueOpt(artist, title, kind, catalogueI
 	defer a.submitMu.Unlock()
 	a.mu.Lock()
 	for _, existing := range a.jobs {
-		if strings.EqualFold(existing.Artist, artist) && strings.EqualFold(existing.Title, title) && existing.Kind == kind && normalize(existing.AlbumTitle) == normalize(albumTitle) && existing.Status != "cancelled" && !existing.CancelRequested && repeatSuppressed(existing, time.Now()) && !(retry && existing.Status == "failed") {
+		if strings.EqualFold(existing.Artist, artist) && strings.EqualFold(existing.Title, title) && existing.Kind == kind && normalize(existing.AlbumTitle) == normalize(albumTitle) && existing.Status != "cancelled" && !existing.Hidden && !existing.CancelRequested && repeatSuppressed(existing, time.Now()) && !(retry && existing.Status == "failed") {
 			snapshot := *existing
 			a.mu.Unlock()
 			return &snapshot, nil
@@ -265,7 +286,9 @@ func (a *acquisitionService) enqueueCatalogueOpt(artist, title, kind, catalogueI
 		if err != nil {
 			return nil, err
 		}
-		if normalize(album.Title) != normalize(title) || normalize(album.Artist.Name) != normalize(artist) {
+		// Same title, and a shared credit: Deezer files "TF?" under Don Toliver alone, the request
+		// names "Don Toliver & Grand Theft Auto VI".
+		if normalize(album.Title) != normalize(title) || !overlap(credits(artist), credits(album.Artist.Name)) {
 			return nil, errors.New("catalogue_album_mismatch")
 		}
 		expected = album.Count
@@ -280,7 +303,7 @@ func (a *acquisitionService) enqueueCatalogueOpt(artist, title, kind, catalogueI
 	}
 	now := time.Now().UTC()
 	j := &acquisitionJob{ID: hex.EncodeToString(idBytes), Artist: artist, Title: title, Kind: kind,
-		CatalogueAlbumID: catalogueID, AlbumTitle: albumTitle, ExpectedTracks: expected,
+		CatalogueAlbumID: catalogueID, AlbumTitle: albumTitle, AlbumArtist: strings.TrimSpace(albumArtist), ExpectedTracks: expected,
 		Source: providers[0], Status: "searching", CreatedAt: now, UpdatedAt: now}
 	if err := a.update(j); err != nil {
 		return nil, errors.New("job_storage_failed")
@@ -310,7 +333,9 @@ func (a *acquisitionService) list(w http.ResponseWriter, _ *http.Request) {
 	a.mu.Lock()
 	jobs := make([]acquisitionJob, 0, len(a.jobs))
 	for _, j := range a.jobs {
-		jobs = append(jobs, *j)
+		if !j.Hidden {
+			jobs = append(jobs, *j)
+		}
 	}
 	a.mu.Unlock()
 	sort.Slice(jobs, func(i, k int) bool { return jobs[i].CreatedAt.After(jobs[k].CreatedAt) })
@@ -343,13 +368,20 @@ func (a *acquisitionService) updateLocked(j *acquisitionJob) error {
 	if a.jobs == nil {
 		a.jobs = make(map[string]*acquisitionJob)
 	}
+	// A copy taken before the artwork arrived must not erase it.
+	if current := a.jobs[j.ID]; current != nil && j.Cover == "" {
+		j.Cover = current.Cover
+	}
 	if current := a.jobs[j.ID]; current != nil && current.CancelRequested {
 		j.CancelRequested = true
 	}
 	if j.CancelRequested && j.Status != "cancelled" {
 		j.Status = "cancelling"
 	}
-	j.UpdatedAt = time.Now().UTC()
+	if !j.keepTime {
+		j.UpdatedAt = time.Now().UTC()
+	}
+	j.keepTime = false
 	data, err := json.Marshal(j)
 	if err != nil {
 		return err
@@ -551,7 +583,11 @@ func (a *acquisitionService) process(ctx context.Context, j *acquisitionJob) err
 			return err
 		}
 		j.Status, j.Error = "rescanned", ""
-		return a.update(j)
+		if err := a.update(j); err != nil {
+			return err
+		}
+		go a.afterAdded(*j)
+		return nil
 	}
 	if j.Source == "qobuz" {
 		return a.processQobuz(ctx, j)
@@ -580,7 +616,7 @@ func (a *acquisitionService) process(ctx context.Context, j *acquisitionJob) err
 			if err != nil {
 				return err
 			}
-			username, files, searchID, err := a.searchSlskd(ctx, token, j.Artist, j.Title, j.Kind, expected, j.AlbumTitle, j.FailedPeers...)
+			username, files, searchID, err := a.searchSlskd(ctx, token, j.Artist, j.Title, j.Kind, expected, j.AlbumTitle, j.AlbumArtist, j.FailedPeers...)
 			if err != nil {
 				return err
 			}
@@ -653,7 +689,11 @@ func (a *acquisitionService) process(ctx context.Context, j *acquisitionJob) err
 			return err
 		}
 		j.Status, j.Error = "rescanned", ""
-		return a.update(j)
+		if err := a.update(j); err != nil {
+			return err
+		}
+		go a.afterAdded(*j)
+		return nil
 	}
 	return nil
 }
@@ -797,12 +837,94 @@ func (a *acquisitionService) musicBrainz(ctx context.Context, route string, outp
 
 // searchSlskd looks for lossless first: when the plain search only turns up lossy
 // files, it searches again for "... flac" before settling for them.
-func (a *acquisitionService) searchSlskd(ctx context.Context, token, artist, title, kind string, expected int, albumTitle string, excluded ...string) (string, []slskFile, string, error) {
-	user, files, id, err := a.searchSlskdQuery(ctx, token, artist+" "+title, artist, title, kind, expected, albumTitle, excluded...)
+// searchSlskd tries several ways to find a lossless copy and takes the first that works:
+// the request as given; a song inside its album; the lead credit with the bracketed parts of
+// the title dropped ("Don Toliver TF"); and a song named "(from <album>)" inside that album.
+// Titles that are only symbols ("?") are searched spelled out ("Questionmark").
+func (a *acquisitionService) searchSlskd(ctx context.Context, token, artist, title, kind string, expected int, albumTitle, albumArtist string, excluded ...string) (string, []slskFile, string, error) {
+	var lastErr error = errors.New("no_suitable_slskd_match")
+	seen := map[string]bool{}
+	for _, at := range searchAttempts(cleanArtist(artist), title, kind, albumTitle, cleanArtist(albumArtist)) {
+		text := searchText(at.text)
+		if text == "" || seen[text] {
+			continue
+		}
+		seen[text] = true
+		user, files, id, err := a.searchSlskdText(ctx, token, text, at.artist, at.title, kind, expected, at.album, excluded...)
+		if err == nil {
+			return user, files, id, nil
+		}
+		lastErr = err
+		if ctx.Err() != nil {
+			return "", nil, "", ctx.Err()
+		}
+	}
+	return "", nil, "", lastErr
+}
+
+type searchAttempt struct{ text, artist, title, album string }
+
+var fromAlbum = regexp.MustCompile(`(?i)[(\[]\s*from\s+([^)\]]+)[)\]]`)
+
+func searchAttempts(artist, title, kind, album, albumArtist string) []searchAttempt {
+	lead := artist
+	if parts := creditSep.Split(artist, 2); len(parts) == 2 && strings.TrimSpace(parts[0]) != "" && !strings.HasPrefix(strings.ToLower(parts[1]), "the ") {
+		lead = strings.TrimSpace(parts[0])
+	}
+	owner := albumArtist
+	if owner == "" {
+		owner = artist
+	}
+	var out []searchAttempt
+	for _, t := range titleSpellings(title) {
+		out = append(out, searchAttempt{artist + " " + t, artist, t, album})
+		plain := strings.TrimSpace(bracketed.ReplaceAllString(t, ""))
+		if kind == "track" && album != "" && normalize(album) != normalize(t) {
+			for _, al := range titleSpellings(album) {
+				out = append(out, searchAttempt{owner + " " + al, owner, t, al})
+			}
+		}
+		if plain != "" && (lead != artist || plain != t) {
+			out = append(out, searchAttempt{lead + " " + plain, lead, t, album})
+		}
+		if kind == "track" {
+			for _, source := range []string{t, album} {
+				if m := fromAlbum.FindStringSubmatch(source); m != nil {
+					parent := strings.TrimSpace(m[1])
+					out = append(out, searchAttempt{lead + " " + parent, lead, t, parent})
+				}
+			}
+		}
+	}
+	return out
+}
+
+// titleSpellings: the title, and for one made only of symbols the words uploaders write
+// instead, since "?" can't be a folder name ("?" -> "Questionmark", "Question Mark").
+func titleSpellings(title string) []string {
+	if normalize(title) != "" {
+		return []string{title}
+	}
+	names := map[rune][2]string{'?': {"Questionmark", "Question Mark"}, '!': {"Exclamation", "Exclamation Mark"},
+		'&': {"And", "Ampersand"}, '#': {"Hashtag", "Number"}, '*': {"Asterisk", "Star"}, '+': {"Plus", "Plus"}}
+	var one, two []string
+	for _, r := range title {
+		if n, ok := names[r]; ok {
+			one, two = append(one, n[0]), append(two, n[1])
+		}
+	}
+	if len(one) == 0 {
+		return []string{title}
+	}
+	return []string{strings.Join(one, " "), strings.Join(two, " ")}
+}
+
+func (a *acquisitionService) searchSlskdText(ctx context.Context, token, text, artist, title, kind string, expected int, albumTitle string, excluded ...string) (string, []slskFile, string, error) {
+	user, files, id, err := a.searchSlskdQuery(ctx, token, text, artist, title, kind, expected, albumTitle, excluded...)
 	if err == nil && allLossless(files) {
 		return user, files, id, nil
 	}
-	if u2, f2, id2, err2 := a.searchSlskdQuery(ctx, token, artist+" "+title+" flac", artist, title, kind, expected, albumTitle, excluded...); err2 == nil && allLossless(f2) {
+	if u2, f2, id2, err2 := a.searchSlskdQuery(ctx, token, text+" flac", artist, title, kind, expected, albumTitle, excluded...); err2 == nil && allLossless(f2) {
 		return u2, f2, id2, nil
 	}
 	return user, files, id, err
@@ -964,7 +1086,8 @@ func rankSlskd(responses []slskResponse, artist, title, kind string, expected in
 	for _, response := range responses {
 		groups := map[string][]slskFile{}
 		for _, file := range response.Files {
-			if !reasonable(file) {
+			// Lossless only: a lossy copy is never added to the library by the companion.
+			if !reasonable(file) || !isLossless(file) {
 				continue
 			}
 			remote := strings.ReplaceAll(file.Filename, "\\", "/")
@@ -1193,6 +1316,10 @@ func (a *acquisitionService) moveFrom(ctx context.Context, j *acquisitionJob, so
 	// The import boundary is atomic with cancelJob: after this point we finish
 	// the library copy instead of risking a half-import or deleting library data.
 	a.mu.Lock()
+	// A copy taken before the artwork arrived must not erase it.
+	if current := a.jobs[j.ID]; current != nil && j.Cover == "" {
+		j.Cover = current.Cover
+	}
 	if current := a.jobs[j.ID]; current != nil && current.CancelRequested {
 		a.mu.Unlock()
 		return context.Canceled
@@ -1502,4 +1629,33 @@ func (a *acquisitionService) scanNavidrome(ctx context.Context) error {
 func jobReviewUnreadable(job *acquisitionJob) {
 	job.CanApproveMetadata = false
 	job.ReviewSummary = "The downloaded audio could not be read. It was kept for inspection and was not imported."
+}
+
+// setHidden deletes entries from the dashboards ({"ids":[...],"hidden":true}) or restores
+// them ("hidden":false). Jobs still running can't be hidden.
+func (a *acquisitionService) setHidden(w http.ResponseWriter, r *http.Request) {
+	var input struct {
+		IDs    []string `json:"ids"`
+		Hidden bool     `json:"hidden"`
+	}
+	r.Body = http.MaxBytesReader(w, r.Body, 64<<10)
+	if json.NewDecoder(r.Body).Decode(&input) != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid_json"})
+		return
+	}
+	changed := 0
+	a.mu.Lock()
+	for _, id := range input.IDs {
+		j := a.jobs[id]
+		if j == nil || j.Hidden == input.Hidden || (input.Hidden && (j.Status == "searching" || j.Status == "downloading" || j.Status == "importing" || j.Status == "moved")) {
+			continue
+		}
+		snapshot := *j
+		snapshot.Hidden, snapshot.keepTime = input.Hidden, true
+		if a.updateLocked(&snapshot) == nil {
+			changed++
+		}
+	}
+	a.mu.Unlock()
+	writeJSON(w, http.StatusOK, map[string]int{"changed": changed})
 }

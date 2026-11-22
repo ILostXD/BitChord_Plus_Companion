@@ -261,6 +261,29 @@ Rejected/offline slskd peers and stalled remote queues or transfers automaticall
 
 Smart tagging has been removed. Existing reports/backups are retained on disk, and older promotion receipts remain readable for crash recovery. No existing library files are scanned or retagged by this feature.
 
+## Lossless only, found several ways
+
+Companion never adds a lossy file by itself: an slskd result is only considered when every file is lossless (FLAC, WAV, AIFF, ALAC). Each request is searched several ways, stopping at the first lossless match: as asked; a song inside its album (album artist + album, taking just that file); the lead credit with bracketed parts dropped; and the album named in a `(from …)` title. Titles made only of symbols are spelled out (`?` → `Questionmark` / `Question Mark`), and search text keeps letters and digits only.
+
+If nothing lossless exists, the app can add JioSaavn's copy instead (off by default, switch on the Requests page): it hands Companion the song's stream (only `*.saavncdn.com` addresses are accepted), and Companion downloads, tags and files it. Albums come one song per call.
+
+The library check also understands an artist's other names: when your library has an album of the same title under a different credit, MusicBrainz aliases decide (Kanye West / Ye).
+
+## Singles to albums
+
+Two settings on the app's Requests page (`GET`/`POST /api/v1/acquisition/jobs/settings`), both off by default:
+
+- **Replace singles with the album.** When an album is added, its songs your library has on single releases (1–3 songs, named after the song, same artist) are moved to `<library>/.replaced-singles/<date>/` (Navidrome skips hidden folders; nothing is deleted), the library is rescanned, and every playlist that held them is rewritten in its own order with the album's tracks. Only the configured account's playlists can be edited.
+- **Get the whole album** once *one*, *half* or *all* of its singles are in your library: after a song arrives, its parent album and that album's singles come from Deezer.
+
+## Requests dashboard
+
+Jobs carry artwork (sent by the app, or looked up on Deezer in the background). Entries can be hidden and restored (`POST /api/v1/acquisition/jobs/hidden`), and `POST /api/v1/acquisition/refresh` re-checks failures against the library and retries the newest ones still missing. Of several attempts at one request, the newest counts.
+
+## Listen Together
+
+Companion also runs BitChord's Listen Together party server (the upstream backend in [`listen/`](listen/NOTICE.md)) under `/api/parties` and `/ws/parties`. BitChord+ uses it automatically when no other party server is set. With nginx in front, run `sudo bash ops/enable-parties.sh` once to let these routes (and the refresh route) through.
+
 ## Jam
 
 The host creates a session and shares a link / QR invitation. Guests receive private member tokens and share a queue with voting, reordering and playback requests. The host confirms actual playback and controls whether guests may play, pause, seek, skip, shuffle and repeat.

@@ -36,7 +36,7 @@ func TestSlskPeerFallbackUntilSuccessfulImport(t *testing.T) {
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				switch {
 				case r.Method == "GET" && r.URL.Path == "/api/v0/searches":
-					_ = json.NewEncoder(w).Encode([]any{map[string]any{"id": "cached", "searchText": "Tyler, The Creator OKRA", "startedAt": time.Now(), "isComplete": true, "responseCount": 3}})
+					_ = json.NewEncoder(w).Encode([]any{map[string]any{"id": "cached", "searchText": "Tyler The Creator OKRA", "startedAt": time.Now(), "isComplete": true, "responseCount": 3}})
 				case r.URL.Path == "/api/v0/searches/cached/responses":
 					peers := []slskResponse{}
 					for _, peer := range []string{"first", "second", "third"} {

@@ -28,6 +28,10 @@
   .dot { width: 10px; height: 10px; border-radius: 50%; flex: none; background: var(--muted); }
   .dot.go { background: var(--blue); animation: pulse 1.4s ease-in-out infinite; } .dot.ok { background: var(--green); }
   .dot.ask { background: var(--orange); } .dot.bad { background: var(--red); }
+  .art { position: relative; width: 48px; height: 48px; flex: none; border-radius: 8px; background: var(--stroke); }
+  .art img { width: 100%; height: 100%; object-fit: cover; border-radius: 8px; display: block; }
+  .art .dot { position: absolute; right: -3px; bottom: -3px; width: 12px; height: 12px; box-sizing: border-box; border: 2px solid var(--bg); }
+  button.icon { width: 36px; height: 36px; padding: 0; font-size: 18px; line-height: 36px; text-align: center; }
   @keyframes pulse { 50% { opacity: .35; } }
   .body { flex: 1; min-width: 0; }
   .title { font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -58,7 +62,7 @@
   <div id="err"></div>
 </div>
 <main id="app" class="hidden">
-  <header><h1>Matching <span>BitChord+</span></h1><span class="pill" id="out">Sign out</span></header>
+  <header><h1>Matching <span>BitChord+</span></h1><span><button id="refresh" title="Re-check failures against your library and retry the newest">Check again</button> <span class="pill" id="out">Sign out</span></span></header>
   <div id="sections"></div>
 </main>
 <script>
@@ -89,6 +93,11 @@ async function api(path, opts = {}) {
 }
 function signOut() { localStorage.removeItem('bcp-auth'); auth = null; show(); }
 $('out').onclick = signOut;
+$('refresh').onclick = async () => {
+  const b = $('refresh'); b.disabled = true; b.textContent = 'Checking…';
+  try { await fetch('/api/v1/acquisition/refresh', { method: 'POST', headers: headers() }); } catch (e) {}
+  setTimeout(() => { b.disabled = false; b.textContent = 'Check again'; tick(); }, 2500);
+};
 $('go').onclick = async () => {
   const user = $('user').value.trim(), pass = $('pass').value;
   if (!user || !pass) return;
@@ -104,7 +113,7 @@ const REASONS = { no_suitable_slskd_match: 'No matching lossless copy was found'
 const esc = s => String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const name = j => `${esc(j.Artist)} – ${esc(j.Title)}`;
 function row(j, dot, sub, actions = '') {
-  return `<div class="row ${dot === 'ask' ? 'ask' : ''}"><span class="dot ${dot}"></span><div class="body"><div class="title">${name(j)}</div><div class="sub">${sub}</div></div><div class="actions">${actions}</div></div>`;
+  return `<div class="row ${dot === 'ask' ? 'ask' : ''}"><div class="art">${j.Cover && /^https:\/\//.test(j.Cover) ? `<img src="${esc(j.Cover)}" alt="" loading="lazy">` : ''}<span class="dot ${dot}"></span></div><div class="body"><div class="title">${name(j)}</div><div class="sub">${sub}</div></div><div class="actions">${actions}</div></div>`;
 }
 function section(title, rows, empty) {
   if (!rows.length && !empty) return '';
@@ -113,7 +122,9 @@ function section(title, rows, empty) {
 function render(all) {
   // Several requests for the same thing show as one: the newest.
   const seen = new Set();
-  const jobs = [...all].sort((a, b) => String(b.UpdatedAt).localeCompare(String(a.UpdatedAt))).filter(j => {
+  // The newest request wins (by when it was made, not last touched), so an old failure
+  // can't cover a later success.
+  const jobs = [...all].sort((a, b) => String(b.CreatedAt).localeCompare(String(a.CreatedAt))).filter(j => {
     const k = [j.Artist, j.Title, j.Kind, j.AlbumTitle].join('|').toLowerCase();
     if (seen.has(k)) return false; seen.add(k); return true;
   });
@@ -132,7 +143,7 @@ function render(all) {
     section('Already in your library', have.map(j => row(j, 'ok', esc(j.ReviewSummary || 'Already there') + (j.Status === 'skipped' ? ' · kept yours' : ''))), '') +
     section('Could not be added', bad.map(j => row(j, 'bad', esc(REASONS[j.Error] || (j.Error || 'Unknown reason').replaceAll('_', ' ')),
       (j.CanApproveMetadata ? `<button class="primary" data-act="approve" data-id="${j.ID}">Import anyway</button>` : '') +
-      `<button data-act="retry" data-id="${j.ID}">Try again</button>`)), '');
+      `<button class="icon" data-act="retry" data-id="${j.ID}" title="Retry" aria-label="Retry">↻</button>`)), '');
 }
 let jobsById = {};
 $('sections').addEventListener('click', async e => {
