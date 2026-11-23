@@ -7,8 +7,10 @@
 
 Companion connects BitChord+ to **Navidrome**. **slskd** and **Qobuz** are optional download providers. It runs on your server, handles shared listening sessions and downloads, and makes upcoming releases available to the app.
 
+<p align="center"><a href="https://github.com/ILostXD/BitChord_Plus_Companion/releases/latest"><img src="https://img.shields.io/github/v/release/ILostXD/BitChord_Plus_Companion?style=for-the-badge&labelColor=0d1117&color=fa233b" alt="Latest release"></a></p>
+
 > [!NOTE]
-> This is alpha software. The README describes the current source tree; released binaries may lag behind it. Companion is a separate service—it does not install, replace or redeploy your existing Navidrome or slskd containers.
+> **Current version: 1.0.0.** BitChord+ shows which version your companion runs at the bottom of **Requests**, and says when a newer [release](https://github.com/ILostXD/BitChord_Plus_Companion/releases) is out. Companion is a separate service: it does not install, replace or redeploy your existing Navidrome or slskd containers.
 
 
 ## What it adds to BitChord+
@@ -369,7 +371,20 @@ Pre-Saves expose download stages, `checkedAt` and `nextCheckAt`, and allow an ex
 
 ## Keeping it up to date
 
-`ops/auto-update.sh` pulls this repository and rebuilds the container when there is something new. Run it from cron, for example every ten minutes:
+Each release is tagged (`v1.0.0`, …) with notes on what changed. To see which version is running, look at the bottom of **Requests** in BitChord+, or ask the companion itself:
+
+```sh
+curl -s http://127.0.0.1:8088/ # {"service":"bitchord-plus-companion","version":"1.0.0"}
+```
+
+To update by hand to the newest release:
+
+```sh
+git fetch --tags && git checkout "$(git describe --tags "$(git rev-list --tags --max-count=1)")"
+docker compose up -d --build
+```
+
+Or follow `main` automatically: `ops/auto-update.sh` pulls this repository and rebuilds the container when there is something new. Run it from cron, for example every ten minutes:
 
 ```sh
 */10 * * * * /path/to/BitChord_Plus_Companion/ops/auto-update.sh >> /path/to/BitChord_Plus_Companion/update.log 2>&1

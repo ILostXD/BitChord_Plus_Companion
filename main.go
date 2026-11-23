@@ -18,7 +18,7 @@ import (
 	"time"
 )
 
-const serviceVersion = "1.0.0-alpha.9"
+const serviceVersion = "1.0.0"
 
 func main() {
 	slog.SetDefault(slog.New(slog.NewJSONHandler(os.Stdout, nil)))
@@ -83,7 +83,11 @@ func newHandler(token string, ctx context.Context, cfg config) http.Handler {
 	mux.HandleFunc("GET /health", healthHandler(cfg, time.Now()))
 	mux.HandleFunc("GET /api/v1/storage", storageHandler(cfg))
 	mux.HandleFunc("GET /api/v1/capabilities", func(w http.ResponseWriter, r *http.Request) {
-		writeJSON(w, 200, map[string]any{"jam": true, "jam_streaming": true, "downloads": cfg.downloadPath != "", "fingerprinting": cfg.acoustidKey != "", "lastfm_metadata": cfg.lastfmKey != ""})
+		body := versionInfo(r.Context())
+		for k, v := range map[string]any{"jam": true, "jam_streaming": true, "downloads": cfg.downloadPath != "", "fingerprinting": cfg.acoustidKey != "", "lastfm_metadata": cfg.lastfmKey != ""} {
+			body[k] = v
+		}
+		writeJSON(w, 200, body)
 	})
 	// Listen Together parties: the upstream party server, with its own party tokens.
 	parties := listen.Handler()
