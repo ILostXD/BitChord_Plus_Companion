@@ -48,7 +48,7 @@ func main() {
 			slog.Error("shutdown_failed")
 		}
 	}()
-	slog.Info("server_started", "address", server.Addr)
+	slog.Info("server_started", "address", server.Addr, "version", serviceVersion)
 	if err := server.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 		slog.Error("server_failed", "error", err.Error())
 		os.Exit(1)

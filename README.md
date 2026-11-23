@@ -371,10 +371,10 @@ Pre-Saves expose download stages, `checkedAt` and `nextCheckAt`, and allow an ex
 
 ## Keeping it up to date
 
-Each release is tagged (`v1.0.0`, …) with notes on what changed. To see which version is running, look at the bottom of **Requests** in BitChord+, or ask the companion itself:
+Each release is tagged (`v1.0.0`, …) with notes on what changed. To see which version is running, look at the bottom of **Requests** in BitChord+, or in the companion's log:
 
 ```sh
-curl -s http://127.0.0.1:8088/ # {"service":"bitchord-plus-companion","version":"1.0.0"}
+docker compose logs companion | grep server_started   # ... "version":"1.0.0"
 ```
 
 To update by hand to the newest release:
