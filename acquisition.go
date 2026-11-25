@@ -114,6 +114,7 @@ func registerAcquisition(mux *http.ServeMux, ctx context.Context, cfg config) *a
 	a.repairMetadata = repairDownloadedMetadata
 	a.restore()
 	go a.sweepFailed()
+	go a.autoRetryLoop()
 	go a.fillCovers()
 	mux.HandleFunc("POST /api/v1/acquisition/jobs", a.create)
 	mux.HandleFunc("GET /api/v1/acquisition/jobs", a.list)
@@ -330,11 +331,21 @@ func repeatSuppressed(j *acquisitionJob, now time.Time) bool {
 }
 
 func (a *acquisitionService) list(w http.ResponseWriter, _ *http.Request) {
+	// NextRetryAt: when a request that found nothing is tried again by itself (see auto_retry.go).
+	type listedJob struct {
+		acquisitionJob
+		NextRetryAt *time.Time `json:",omitempty"`
+	}
 	a.mu.Lock()
-	jobs := make([]acquisitionJob, 0, len(a.jobs))
+	plan := a.retryPlan()
+	jobs := make([]listedJob, 0, len(a.jobs))
 	for _, j := range a.jobs {
 		if !j.Hidden {
-			jobs = append(jobs, *j)
+			listed := listedJob{acquisitionJob: *j}
+			if at, ok := plan[j.ID]; ok {
+				listed.NextRetryAt = &at
+			}
+			jobs = append(jobs, listed)
 		}
 	}
 	a.mu.Unlock()

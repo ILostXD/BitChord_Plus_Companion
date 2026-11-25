@@ -609,7 +609,8 @@ func (s *releaseService) acquireDue() {
 				continue
 			}
 		}
-		job, err := s.a.enqueue(album.Artist, album.Title, "album")
+		// A retry must get past the day-long repeat suppression, or the hourly release-day retries do nothing.
+		job, err := s.a.enqueueCatalogueOpt(album.Artist, album.Title, "album", "", "", "", album.JobID != "")
 		if err != nil {
 			album.Status, album.Error, album.CheckedAt = "failed", "Waiting for a matching source or catalogue", time.Now().UnixMilli()
 			album.NextCheckAt = time.Now().Add(releaseRetryInterval(album.ReleaseAt, time.Now())).UnixMilli()
