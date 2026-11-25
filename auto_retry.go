@@ -43,7 +43,11 @@ func (a *acquisitionService) retryPlan() map[string]time.Time {
 		if j.Hidden || j.Status == "cancelled" || j.CancelRequested {
 			continue
 		}
-		key := strings.ToLower(cleanArtist(j.Artist) + "|" + j.Title + "|" + j.Kind + "|" + normalize(j.AlbumTitle))
+		artist := j.Artist
+		if j.Kind == "album" {
+			artist = a.albumArtistLocked(artist, j.Title) // one album asked for under two credits is one request
+		}
+		key := strings.ToLower(cleanArtist(artist) + "|" + j.Title + "|" + j.Kind + "|" + normalize(j.AlbumTitle))
 		r := requests[key]
 		if r == nil {
 			requests[key] = &request{first: j.CreatedAt, newest: j}
@@ -122,4 +126,34 @@ func (a *acquisitionService) askForAlbum(song acquisitionJob) {
 	if job, err := a.enqueueCatalogueOpt(artist, song.AlbumTitle, "album", "", "", "", false); err == nil && song.Cover != "" {
 		a.setCover(job.ID, song.Cover)
 	}
+}
+
+// albumArtistLocked: the artist one album is asked for under, so it is one request however it
+// is credited. "Grand Theft Auto VI: The Album" asked for as Travis Scott's (a song's artist) and
+// as Grand Theft Auto VI's is one album: the name in the title wins, else the first asked for
+// with a shared credit. Callers hold a.mu.
+func (a *acquisitionService) albumArtistLocked(artist, title string) string {
+	named := func(who string) bool {
+		n := normalize(cleanArtist(who))
+		return n != "" && strings.Contains(normalize(title), n)
+	}
+	if named(artist) {
+		return artist
+	}
+	var first *acquisitionJob
+	for _, j := range a.jobs {
+		if j.Kind != "album" || j.Hidden || j.Status == "cancelled" || normalize(j.Title) != normalize(title) || strings.EqualFold(j.Artist, artist) {
+			continue
+		}
+		if named(j.Artist) {
+			return j.Artist
+		}
+		if overlap(credits(j.Artist), credits(artist)) && (first == nil || j.CreatedAt.Before(first.CreatedAt)) {
+			first = j
+		}
+	}
+	if first != nil {
+		return first.Artist
+	}
+	return artist
 }

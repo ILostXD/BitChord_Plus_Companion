@@ -37,3 +37,20 @@ func TestRetryPlanOnlyNewestRetryableFailure(t *testing.T) {
 		t.Fatalf("want new at +5h (6h after it failed), got %v", plan)
 	}
 }
+
+func TestAlbumArtistIsOnePerAlbum(t *testing.T) {
+	now := time.Now().UTC()
+	a := &acquisitionService{jobs: map[string]*acquisitionJob{
+		"gta": {ID: "gta", Artist: "Grand Theft Auto VI", Title: "Grand Theft Auto VI: The Album", Kind: "album", Status: "failed", CreatedAt: now},
+		"duo": {ID: "duo", Artist: "Don Toliver & Travis Scott", Title: "Duo Album", Kind: "album", Status: "searching", CreatedAt: now},
+	}}
+	if got := a.albumArtistLocked("Travis Scott", "Grand Theft Auto VI: The Album"); got != "Grand Theft Auto VI" {
+		t.Fatal("the artist named in the title should win, got", got)
+	}
+	if got := a.albumArtistLocked("Travis Scott", "Duo Album"); got != "Don Toliver & Travis Scott" {
+		t.Fatal("a shared credit should join the existing request, got", got)
+	}
+	if got := a.albumArtistLocked("Someone Else", "Duo Album"); got != "Someone Else" {
+		t.Fatal("an unrelated artist's album of the same name stays separate, got", got)
+	}
+}

@@ -261,6 +261,9 @@ func (a *acquisitionService) enqueueCatalogueOpt(artist, title, kind, catalogueI
 	a.submitMu.Lock()
 	defer a.submitMu.Unlock()
 	a.mu.Lock()
+	if kind == "album" {
+		artist = a.albumArtistLocked(artist, title)
+	}
 	for _, existing := range a.jobs {
 		if strings.EqualFold(existing.Artist, artist) && strings.EqualFold(existing.Title, title) && existing.Kind == kind && normalize(existing.AlbumTitle) == normalize(albumTitle) && existing.Status != "cancelled" && !existing.Hidden && !existing.CancelRequested && repeatSuppressed(existing, time.Now()) && !(retry && existing.Status == "failed") {
 			snapshot := *existing
@@ -306,6 +309,15 @@ func (a *acquisitionService) enqueueCatalogueOpt(artist, title, kind, catalogueI
 	j := &acquisitionJob{ID: hex.EncodeToString(idBytes), Artist: artist, Title: title, Kind: kind,
 		CatalogueAlbumID: catalogueID, AlbumTitle: albumTitle, AlbumArtist: strings.TrimSpace(albumArtist), ExpectedTracks: expected,
 		Source: providers[0], Status: "searching", CreatedAt: now, UpdatedAt: now}
+	// A new attempt keeps the artwork an earlier one of the same request found.
+	a.mu.Lock()
+	for _, earlier := range a.jobs {
+		if earlier.Cover != "" && earlier.Kind == kind && strings.EqualFold(earlier.Title, title) && strings.EqualFold(cleanArtist(earlier.Artist), cleanArtist(artist)) {
+			j.Cover = earlier.Cover
+			break
+		}
+	}
+	a.mu.Unlock()
 	if err := a.update(j); err != nil {
 		return nil, errors.New("job_storage_failed")
 	}
