@@ -105,3 +105,21 @@ func (a *acquisitionService) autoRetry(now time.Time) {
 		time.Sleep(time.Second)
 	}
 }
+
+// askForAlbum: a song no one shares on its own is often there inside its album, so the whole
+// album is asked for (unless the library has it, or it is the song's own single).
+func (a *acquisitionService) askForAlbum(song acquisitionJob) {
+	if song.Kind != "track" || song.AlbumTitle == "" || normalize(song.AlbumTitle) == normalize(song.Title) {
+		return
+	}
+	artist := cleanArtist(song.AlbumArtist)
+	if artist == "" {
+		artist = cleanArtist(song.Artist)
+	}
+	if a.recordLibraryDecisionOpt(a.ctx, artist, song.AlbumTitle, "album", "", 0, false) != nil {
+		return
+	}
+	if job, err := a.enqueueCatalogueOpt(artist, song.AlbumTitle, "album", "", "", "", false); err == nil && song.Cover != "" {
+		a.setCover(job.ID, song.Cover)
+	}
+}

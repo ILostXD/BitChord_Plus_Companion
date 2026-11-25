@@ -554,6 +554,9 @@ func (a *acquisitionService) run(id string) {
 			j.Error = err.Error()
 		}
 		_ = a.update(&j)
+		if j.Status == "failed" && j.Error == "no_suitable_slskd_match" {
+			go a.askForAlbum(j)
+		}
 		if j.Status == "moved" || j.SwitchPeer {
 			time.AfterFunc(30*time.Second, func() {
 				if a.ctx.Err() == nil {
