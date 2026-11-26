@@ -10,7 +10,7 @@ Companion connects BitChord+ to **Navidrome**. **slskd** and **Qobuz** are optio
 <p align="center"><a href="https://github.com/ILostXD/BitChord_Plus_Companion/releases/latest"><img src="https://img.shields.io/github/v/release/ILostXD/BitChord_Plus_Companion?style=for-the-badge&labelColor=0d1117&color=fa233b" alt="Latest release"></a></p>
 
 > [!NOTE]
-> **Current version: 1.0.0.** BitChord+ shows which version your companion runs at the bottom of **Requests**, and says when a newer [release](https://github.com/ILostXD/BitChord_Plus_Companion/releases) is out. Companion is a separate service: it does not install, replace or redeploy your existing Navidrome or slskd containers.
+> **Current version: 1.1.0.** BitChord+ shows which version your companion runs at the bottom of **Requests**, and says when a newer [release](https://github.com/ILostXD/BitChord_Plus_Companion/releases) is out. Companion is a separate service: it does not install, replace or redeploy your existing Navidrome or slskd containers.
 
 
 ## What it adds to BitChord+

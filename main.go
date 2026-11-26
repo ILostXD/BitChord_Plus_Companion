@@ -18,7 +18,7 @@ import (
 	"time"
 )
 
-const serviceVersion = "1.0.0"
+const serviceVersion = "1.1.0"
 
 func main() {
 	slog.SetDefault(slog.New(slog.NewJSONHandler(os.Stdout, nil)))
